@@ -13,10 +13,10 @@ def get_url(url):
     proxy_url = 'https://api.webscraping.ai/html?' + urlencode(payload)
     return proxy_url
 
-class PostSpider(scrapy.Spider):
-    name = 'post'
+class PicSpider(scrapy.Spider):
+    name = 'pic'
     allowed_domains = ['api.webscraping.ai']
-    custom_settings = {'CONCURRENT_REQUESTS_PER_DOMAIN': 5, 'FEED_URI' : f"{user_accounts}.csv"}    
+    custom_settings = {'CONCURRENT_REQUESTS_PER_DOMAIN': 5}    
 
     def start_requests(self):
         for username in user_accounts:
@@ -28,27 +28,15 @@ class PostSpider(scrapy.Spider):
         json_string = "{" + x.strip().split('= {')[1][:-1]
         data = json.loads(json_string)
         
-        # 사용자 id, 포스트 주소, 포스트 게시 날짜, 좋아요 수, 댓글 수, 캡션을 json으로 파싱
+        # 사용자 id, 포스트의 썸네일 사진을 json으로 파싱
         user_id = data['entry_data']['ProfilePage'][0]['graphql']['user']['id']
         next_page_bool = \
             data['entry_data']['ProfilePage'][0]['graphql']['user']['edge_owner_to_timeline_media']['page_info'][
                 'has_next_page']
         edges = data['entry_data']['ProfilePage'][0]['graphql']['user']['edge_owner_to_timeline_media']['edges']
         for i in edges:
-            url = 'https://www.instagram.com/p/' + i['node']['shortcode']
-            date_posted_timestamp = i['node']['taken_at_timestamp']
-            date_posted_human = datetime.fromtimestamp(date_posted_timestamp).strftime("%d/%m/%Y %H:%M:%S")
-            like_count = i['node']['edge_media_preview_like']['count'] if "edge_media_preview_like" in i['node'].keys() else ''
-            comment_count = i['node']['edge_media_to_comment']['count'] if 'edge_media_to_comment' in i[
-                'node'].keys() else ''
-            captions = ""
-            
-            if i['node']['edge_media_to_caption']:
-                for i2 in i['node']['edge_media_to_caption']['edges']:
-                    captions += i2['node']['text'] 
-                captions = [i.replace('\n','') for i in captions]     
-                captions = ''.join(captions)   
-            item = {'postURL': url, 'date_posted': date_posted_human, 'likeCount': like_count, 'commentCount': comment_count, 'captions': captions}        
+            image_url = i['node']['thumbnail_resources'][-1]['src']
+            item = {'image_url': image_url}        
             yield item
         if next_page_bool:
             cursor = data['entry_data']['ProfilePage'][0]['graphql']['user']['edge_owner_to_timeline_media']['page_info'][
@@ -65,19 +53,8 @@ class PostSpider(scrapy.Spider):
         di = response.meta['pages_di']
         data = json.loads(response.text)
         for i in data['data']['user']['edge_owner_to_timeline_media']['edges']:
-            url = 'https://www.instagram.com/p/' + i['node']['shortcode']
-            date_posted_timestamp = i['node']['taken_at_timestamp']
-            captions = ""
-            if i['node']['edge_media_to_caption']:
-                for i2 in i['node']['edge_media_to_caption']['edges']:
-                    captions += i2['node']['text']
-                captions = [i.replace('\n','') for i in captions] 
-                captions = ''.join(captions)            
-            comment_count = i['node']['edge_media_to_comment']['count'] if 'edge_media_to_comment' in i['node'].keys() else ''
-            date_posted_human = datetime.fromtimestamp(date_posted_timestamp).strftime("%d/%m/%Y %H:%M:%S")
-            like_count = i['node']['edge_media_preview_like']['count'] if "edge_media_preview_like" in i['node'].keys() else ''
-            item = {'postURL': url,  'date_posted': date_posted_human,
-                    'likeCount': like_count, 'commentCount': comment_count, 'captions': captions}
+            image_url = i['node']['thumbnail_resources'][-1]['src']
+            item = {'image_url': image_url}     
             yield item
         next_page_bool = data['data']['user']['edge_owner_to_timeline_media']['page_info']['has_next_page']
         if next_page_bool:

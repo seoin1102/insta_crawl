@@ -1,11 +1,24 @@
 # -*- coding: utf-8 -*-
 import scrapy
+from urllib.parse import urlencode
 import json
-user_accounts = ['jyjyy0926', 'im_in43','hae_jooooo_','fresh_bizzy','jio_o512','sunbaakim']
+from datetime import datetime
+API = '75d53510-8a3a-49e0-b44f-0151bea39e09'
+user_accounts = ['jane_sooeun']
+import logging
+
+
+def get_url(url):
+    payload = {'api_key': API, 'proxy': 'residential', 'timeout': '20000', 'url': url}
+    proxy_url = 'https://api.webscraping.ai/html?' + urlencode(payload)
+    return proxy_url
+
 
 class InstaCrawlSpider(scrapy.Spider):
     name = 'insta_crawl'
-    allowed_domains = ['www.instagram.com/']
+    allowed_domains = ['api.webscraping.ai']
+    custom_settings = {'CONCURRENT_REQUESTS_PER_DOMAIN': 5, 'FEED_URI' : f"{user_accounts}.csv"}    
+
     
 
     def start_requests(self):
