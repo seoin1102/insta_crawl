@@ -1,0 +1,74 @@
+# -*- coding: utf-8 -*-
+import scrapy
+from urllib.parse import urlencode
+import json
+import requests
+from datetime import datetime
+import base64
+API = '75d53510-8a3a-49e0-b44f-0151bea39e09'
+
+user_accounts = ['p/CLpwvGRH0Q-/']
+
+token = 'a9151baac138bde82e0bf7fd342f741109bb3687'
+
+headers= {'Authorization': 'token ' + token,
+    'Accept': 'application/json',
+    'Content-Type': 'application/json;charset=UTF-8'
+    }
+# api의 인플루언서 리스트를 가져옴.
+def influencer_list():
+    url ='https://api.staging.dabi-api.com/api/influencer/'
+    user_list = {}
+    i=760
+    while 1:
+        response = requests.get(url+'?offset='+str(i), headers=headers)
+        data = response.json()
+        result = data['results']
+        
+        for i2 in range(len(result)):
+            user_list[result[i2]['insta_id']]=result[i2]['pk']    
+        i+=20
+        if data['next']==None:
+            break   
+    return user_list   
+
+
+def get_url(url):
+    payload = {'api_key': API, 'proxy': 'residential', 'timeout': '20000', 'url': url}
+    proxy_url = 'https://api.webscraping.ai/html?' + urlencode(payload)
+    return proxy_url
+
+class PostSpider(scrapy.Spider):
+    name = 'image'
+    allowed_domains = ['api.webscraping.ai']
+    custom_settings = {'CONCURRENT_REQUESTS_PER_DOMAIN': 5, 'FEED_URI' : "haejoo.json"}    
+     
+    def start_requests(self):
+        for username in user_accounts:
+            url = f'https://www.instagram.com/{username}'
+            yield scrapy.Request(get_url(url), callback=self.parse)
+
+    def parse(self, response):
+        
+        x = response.xpath("//script[starts-with(.,'window._sharedData')]/text()").extract_first()
+        json_string = "{" + x.strip().split('= {')[1][:-1]
+        data = json.loads(json_string)
+        edges = data["entry_data"]["PostPage"][0]["graphql"]["shortcode_media"]['edge_sidecar_to_children']['edges']
+        item ={}
+
+        for edge in edges:
+            is_video = edge['node']['is_video']
+            if is_video:
+                video_url = edge['node']['video_url']
+                video_url.replace(r'\u0026', "&")
+                item['video'] = video_url
+            else:
+                display_url = edge['node']['display_resources'][-1]['src']
+                display_url.replace(r'\u0026', "&")
+                base64_bytes = base64.b64encode(requests.get(display_url).content)
+                display_url = base64_bytes.decode('utf-8')
+                
+                item['source'] = display_url
+                yield item
+        
+ 
