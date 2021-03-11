@@ -5,6 +5,10 @@ import json
 import requests
 from datetime import datetime
 import base64
+
+# 인플루언서 리스트번호를 입력해서 포스트를 업데이트하는 코드입니다.
+    ex. 0 입력하면 처음부터 마지막 리스트까지 업데이트가 가능합니다.
+
 API = '75d53510-8a3a-49e0-b44f-0151bea39e09'
 token = 'a9151baac138bde82e0bf7fd342f741109bb3687'
 
