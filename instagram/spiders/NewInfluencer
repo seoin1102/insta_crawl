@@ -1,0 +1,202 @@
+# -*- coding: utf-8 -*-
+import scrapy
+from urllib.parse import urlencode
+import json
+import requests
+from datetime import datetime
+import base64
+import time
+
+
+start = time.time()
+API = '75d53510-8a3a-49e0-b44f-0151bea39e09'
+token = 'a9151baac138bde82e0bf7fd342f741109bb3687'
+
+headers= {'Authorization': 'token ' + token,
+    'Accept': 'application/json',
+    'Content-Type': 'application/json;charset=UTF-8'
+    }
+   
+# api의 인플루언서 리스트를 가져옴.
+def influencer_list():
+    url ='https://api.staging.dabi-api.com/api/influencer/'
+
+    user_list = []
+    i=0
+    while 1:
+        response = requests.get(url+'?offset='+str(i), headers=headers)
+        data = response.json()
+        result = data['results']
+        
+        for i2 in range(len(result)):
+            user_list.append(result[i2]['insta_id']) 
+        i+=20
+        if data['next']==None:
+            break   
+    return user_list 
+
+user_accounts = influencer_list()
+
+def influencer_pk(influencer):
+    url ='https://api.staging.dabi-api.com/api/influencer/'
+
+    
+    i=0
+    while 1:
+        response = requests.get(url+'?offset='+str(i), headers=headers)
+        data = response.json()
+        result = data['results']
+        
+        for i2 in range(len(result)):
+            if influencer == result[i2]['insta_id']:
+
+                return result[i2]['pk']    
+        i+=20
+        if data['next']==None:
+            break   
+    
+
+
+def search_influencer():
+    search = input("insta_id: ")
+    url = 'https://api.staging.dabi-api.com/api/influencer/'
+    for i in user_accounts:
+        if i == search:
+            user_list  = [search]
+            return user_list 
+        if i != search:
+            image_url = 'https://scontent-gmp1-1.cdninstagram.com/v/t51.2885-19/s150x150/155957141_3785996471483284_1730383500836336521_n.jpg?tp=1&_nc_ht=scontent-gmp1-1.cdninstagram.com&_nc_ohc=K4UgBKX2QfAAX9yUVq8&oh=a482688ab747f1512c18a3af832d0cce&oe=606FC528'
+            base64_bytes = base64.b64encode(requests.get(image_url).content)
+            image_url = base64_bytes.decode('utf-8')
+            requests.post(url, json={"insta_id": search, "profile_image": image_url}, headers=headers)
+            influencer_list()
+            user_list  = [search]
+            return user_list 
+     
+
+user_accounts = search_influencer()
+
+
+def check_post(influencer_id):
+    pk = influencer_pk(influencer_id)
+    response = requests.get('https://api.staging.dabi-api.com/api/influencer/'+str(pk)+'/feedback/', headers=headers)
+    data = response.json()
+    result = data['results']
+    post_list=[]
+    for i in range(len(result)):
+        post_list.append(result[i]['post_url'])
+       
+    return post_list
+
+def get_url(url):
+    payload = {'api_key': API, 'proxy': 'residential', 'timeout': '20000', 'url': url}
+    proxy_url = 'https://api.webscraping.ai/html?' + urlencode(payload)
+    return proxy_url
+
+class PostSpider(scrapy.Spider):
+    name = 'New'
+    allowed_domains = ['api.webscraping.ai']
+    custom_settings = {'CONCURRENT_REQUESTS_PER_DOMAIN': 5,  'FEED_URI' : f"{user_accounts}.json"}    
+
+    def start_requests(self):
+        
+        for username in user_accounts:
+            url = f'https://www.instagram.com/{username}'
+            
+            yield scrapy.Request(get_url(url), callback=self.parse)
+
+    def parse(self, response):
+        x = response.xpath("//script[starts-with(.,'window._sharedData')]/text()").extract_first()
+        json_string = "{" + x.strip().split('= {')[1][:-1]
+        data = json.loads(json_string)
+        
+        # 사용자 id, 포스트 주소, 포스트 게시 날짜, 좋아요 수, 댓글 수, 캡션을 json으로 파싱
+        user_id = data['entry_data']['ProfilePage'][0]['graphql']['user']['id']
+        username = data['entry_data']['ProfilePage'][0]['graphql']['user']['username']
+        next_page_bool = \
+            data['entry_data']['ProfilePage'][0]['graphql']['user']['edge_owner_to_timeline_media']['page_info'][
+                'has_next_page']
+        edges = data['entry_data']['ProfilePage'][0]['graphql']['user']['edge_owner_to_timeline_media']['edges']
+        edge=[]
+        for i in edges:
+            url = 'https://www.instagram.com/p/' + i['node']['shortcode']
+            if url not in check_post(username):
+                edge.append(i)
+        for i in edge:
+            url = 'https://www.instagram.com/p/' + i['node']['shortcode']
+    
+            image_url = i['node']['thumbnail_resources'][-1]['src']
+            base64_bytes = base64.b64encode(requests.get(image_url).content)
+            image_url = base64_bytes.decode('utf-8')
+            date_posted_timestamp = i['node']['taken_at_timestamp']
+            date_posted_human = datetime.fromtimestamp(date_posted_timestamp).strftime("%Y-%m-%d")
+        
+            captions = ""
+            
+            if i['node']['edge_media_to_caption']:
+                for i2 in i['node']['edge_media_to_caption']['edges']:
+                    captions += i2['node']['text'] 
+                captions = [i.replace('\n','') for i in captions]     
+                captions = ''.join(captions)   
+            item = {'post_url': url, 'post_thumb_image':image_url ,'post_taken_at_timestamp': date_posted_human,
+                    'post_description': captions} 
+                        
+            pk= influencer_pk(username)        
+            pk_url = f'https://api.staging.dabi-api.com/api/influencer/{pk}/feedback/'
+            requests.post(pk_url, json={"post_url": url, "post_thumb_image":image_url ,"post_taken_at_timestamp": date_posted_human,
+                    "post_description": captions}, headers=headers)            
+            yield item
+        if next_page_bool:
+            cursor = data['entry_data']['ProfilePage'][0]['graphql']['user']['edge_owner_to_timeline_media']['page_info'][
+                    'end_cursor']
+            di = {'id': user_id, 'first': 12, 'after': cursor}
+            print(di)
+            params = {'query_hash': 'e769aa130647d2354c40ea6a439bfc08', 'variables': json.dumps(di)}
+            url = 'https://www.instagram.com/graphql/query/?' + urlencode(params)
+            
+         
+            yield scrapy.Request(get_url(url), callback=self.parse_pages, meta={'pages_di': di})
+
+    def parse_pages(self, response):
+        di = response.meta['pages_di']
+        data = json.loads(response.text)
+        for i in data['data']['user']['edge_owner_to_timeline_media']['edges']:
+            url = 'https://www.instagram.com/p/' + i['node']['shortcode']
+            username = data['entry_data']['ProfilePage'][0]['graphql']['user']['username'] 
+            
+
+            image_url = i['node']['thumbnail_resources'][-1]['src']
+            base64_bytes = base64.b64encode(requests.get(image_url).content)
+            image_url = base64_bytes.decode('utf-8')
+            date_posted_timestamp = i['node']['taken_at_timestamp']
+            captions = ""
+            
+            if i['node']['edge_media_to_caption']:
+                for i2 in i['node']['edge_media_to_caption']['edges']:
+                    captions += i2['node']['text']
+                captions = [i.replace('\n','') for i in captions] 
+                captions = ''.join(captions)            
+            date_posted_human = datetime.fromtimestamp(date_posted_timestamp).strftime("%Y-%m-%d")
+            item = {'post_url': url, 'post_thumb_image':image_url ,'post_taken_at_timestamp': date_posted_human,
+                    'post_description': captions}
+            pk= influencer_pk(username)        
+            pk_url = f'https://api.staging.dabi-api.com/api/influencer/{pk}/feedback/'
+            requests.post(pk_url, json={"post_url": url, "post_thumb_image":image_url ,"post_taken_at_timestamp": date_posted_human,
+                    "post_description": captions}, headers=headers)     
+            yield item
+        next_page_bool = data['data']['user']['edge_owner_to_timeline_media']['page_info']['has_next_page']
+        if next_page_bool:
+            cursor = data['data']['user']['edge_owner_to_timeline_media']['page_info']['end_cursor']
+            di['after'] = cursor
+            params = {'query_hash': 'e769aa130647d2354c40ea6a439bfc08', 'variables': json.dumps(di)}
+            url = 'https://www.instagram.com/graphql/query/?' + urlencode(params)
+            yield scrapy.Request(get_url(url), callback=self.parse_pages, meta={'pages_di': di})
+
+   
+
+    def get_item(self, response):
+        # only from the first page
+        item = response.meta['item']
+        print("걸린시간 :", time.time() - start)
+        yield item
+
