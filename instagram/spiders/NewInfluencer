@@ -7,6 +7,7 @@ from datetime import datetime
 import base64
 import time
 
+# 인플루언서의 아이디를 입력해서 인플루언서를 새로 추가하거나 포스트를 업데이트하는 코드입니다.
 
 start = time.time()
 API = '75d53510-8a3a-49e0-b44f-0151bea39e09'
