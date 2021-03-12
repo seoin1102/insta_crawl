@@ -7,7 +7,6 @@ from datetime import datetime
 import base64
 import time
 
-# 인플루언서의 아이디를 입력해서 인플루언서를 새로 추가하거나 포스트를 업데이트하는 코드입니다.
 
 start = time.time()
 API = '75d53510-8a3a-49e0-b44f-0151bea39e09'
@@ -66,13 +65,14 @@ def search_influencer():
             user_list  = [search]
             return user_list 
         if i != search:
-            image_url = 'https://scontent-gmp1-1.cdninstagram.com/v/t51.2885-19/s150x150/155957141_3785996471483284_1730383500836336521_n.jpg?tp=1&_nc_ht=scontent-gmp1-1.cdninstagram.com&_nc_ohc=K4UgBKX2QfAAX9yUVq8&oh=a482688ab747f1512c18a3af832d0cce&oe=606FC528'
-            base64_bytes = base64.b64encode(requests.get(image_url).content)
-            image_url = base64_bytes.decode('utf-8')
-            requests.post(url, json={"insta_id": search, "profile_image": image_url}, headers=headers)
-            influencer_list()
+            # image_url = 'https://scontent-gmp1-1.cdninstagram.com/v/t51.2885-19/s150x150/155957141_3785996471483284_1730383500836336521_n.jpg?tp=1&_nc_ht=scontent-gmp1-1.cdninstagram.com&_nc_ohc=K4UgBKX2QfAAX9yUVq8&oh=a482688ab747f1512c18a3af832d0cce&oe=606FC528'
+            # base64_bytes = base64.b64encode(requests.get(image_url).content)
+            # image_url = base64_bytes.decode('utf-8')
+            # requests.post(url, json={"insta_id": search, "profile_image": image_url}, headers=headers)
+            # influencer_list()
             user_list  = [search]
             return user_list 
+            
      
 
 user_accounts = search_influencer()
@@ -95,7 +95,7 @@ def get_url(url):
     return proxy_url
 
 class PostSpider(scrapy.Spider):
-    name = 'New'
+    name = 'NewNew'
     allowed_domains = ['api.webscraping.ai']
     custom_settings = {'CONCURRENT_REQUESTS_PER_DOMAIN': 5,  'FEED_URI' : f"{user_accounts}.json"}    
 
@@ -119,6 +119,11 @@ class PostSpider(scrapy.Spider):
                 'has_next_page']
         edges = data['entry_data']['ProfilePage'][0]['graphql']['user']['edge_owner_to_timeline_media']['edges']
         edge=[]
+        image_url = data['entry_data']['ProfilePage'][0]['graphql']['user']['profile_pic_url']
+        base64_bytes = base64.b64encode(requests.get(image_url).content)
+        image_url = base64_bytes.decode('utf-8')
+        requests.post('https://api.staging.dabi-api.com/api/influencer/', json={"insta_id": username, "profile_image": image_url}, headers=headers)
+        
         for i in edges:
             url = 'https://www.instagram.com/p/' + i['node']['shortcode']
             if url not in check_post(username):
@@ -141,11 +146,13 @@ class PostSpider(scrapy.Spider):
                 captions = ''.join(captions)   
             item = {'post_url': url, 'post_thumb_image':image_url ,'post_taken_at_timestamp': date_posted_human,
                     'post_description': captions} 
-                        
+            
+
             pk= influencer_pk(username)        
             pk_url = f'https://api.staging.dabi-api.com/api/influencer/{pk}/feedback/'
             requests.post(pk_url, json={"post_url": url, "post_thumb_image":image_url ,"post_taken_at_timestamp": date_posted_human,
-                    "post_description": captions}, headers=headers)            
+                    "post_description": captions}, headers=headers)    
+
             yield item
         if next_page_bool:
             cursor = data['entry_data']['ProfilePage'][0]['graphql']['user']['edge_owner_to_timeline_media']['page_info'][
