@@ -7,7 +7,7 @@ from datetime import datetime
 import base64
 
 # 인플루언서 리스트번호를 입력해서 포스트를 업데이트하는 코드입니다.
-    ex. 0 입력하면 처음부터 마지막 리스트까지 업데이트가 가능합니다.
+#    ex. 0 입력하면 처음부터 마지막 리스트까지 업데이트가 가능합니다.
 
 API = '75d53510-8a3a-49e0-b44f-0151bea39e09'
 token = 'a9151baac138bde82e0bf7fd342f741109bb3687'
@@ -16,9 +16,10 @@ headers= {'Authorization': 'token ' + token,
     'Accept': 'application/json',
     'Content-Type': 'application/json;charset=UTF-8'
     }
+
 k = int(input("list: "))
 
-# api의 인플루언서 리스트를 가져옴.
+# 입력받은 번호부터 인플루언서 리스트를 가져옴.
 def influencer_list(num):
     url ='https://api.staging.dabi-api.com/api/influencer/'
     
@@ -35,23 +36,25 @@ def influencer_list(num):
             break   
     return user_list   
 
+# user_accounts에 인플루언서 리스트가 저장됨. 
 user_accounts = influencer_list(k)
+
+# 인플루언서의 pk를 불러옴.
 def influencer_pk(influencer):
     url ='https://api.staging.dabi-api.com/api/influencer/'
-    
+    i=0
     while 1:
         response = requests.get(url+'?offset='+str(k), headers=headers)
         data = response.json()
         result = data['results']
-        
         for i2 in range(len(result)):
             if influencer == result[i2]['insta_id']:
-
                 return result[i2]['pk']    
         i+=20
         if data['next']==None:
             break   
 
+# 현재 DB에 저장되어있는 포스트들의 주소를 리스트로 저장. 
 def check_post(influencer_id):
     pk = influencer_pk(influencer_id)
     response = requests.get('https://api.staging.dabi-api.com/api/influencer/'+str(pk)+'/feedback/', headers=headers)
@@ -63,21 +66,22 @@ def check_post(influencer_id):
        
     return post_list
 
+# 프록시 주소로 변경한 인스타그램 페이지를 만듬.
 def get_url(url):
     payload = {'api_key': API, 'proxy': 'residential', 'timeout': '20000', 'url': url}
     proxy_url = 'https://api.webscraping.ai/html?' + urlencode(payload)
     return proxy_url
+
 
 class PostSpider(scrapy.Spider):
     name = 'List'
     allowed_domains = ['api.webscraping.ai']
     custom_settings = {'CONCURRENT_REQUESTS_PER_DOMAIN': 5,  'FEED_URI' : "List.json"}    
 
+    # user_accounts에 있는 인플루언서의 인스타그램 페이지를 차례대로 호출.
     def start_requests(self):
-        
         for username in user_accounts:
             url = f'https://www.instagram.com/{username}'
-            
             yield scrapy.Request(get_url(url), callback=self.parse)
 
     def parse(self, response):
@@ -85,7 +89,7 @@ class PostSpider(scrapy.Spider):
         json_string = "{" + x.strip().split('= {')[1][:-1]
         data = json.loads(json_string)
         
-        # 사용자 id, 포스트 주소, 포스트 게시 날짜, 좋아요 수, 댓글 수, 캡션을 json으로 파싱
+        # 사용자 id, 포스트 주소, 포스트 게시 날짜, 좋아요 수, 댓글 수, 캡션을 json으로 파싱.
         user_id = data['entry_data']['ProfilePage'][0]['graphql']['user']['id']
         username = data['entry_data']['ProfilePage'][0]['graphql']['user']['username']
         next_page_bool = \
@@ -93,19 +97,20 @@ class PostSpider(scrapy.Spider):
                 'has_next_page']
         edges = data['entry_data']['ProfilePage'][0]['graphql']['user']['edge_owner_to_timeline_media']['edges']
         edge=[]
+        # 이미 DB에 있는 저장되어있는 포스트는 걸러냄. 
         for i in edges:
             url = 'https://www.instagram.com/p/' + i['node']['shortcode']
             if url not in check_post(username):
                 edge.append(i)
+
+        # 걸러진 새로운 포스트들을 크롤.        
         for i in edge:
             url = 'https://www.instagram.com/p/' + i['node']['shortcode']
-    
             image_url = i['node']['thumbnail_resources'][-1]['src']
             base64_bytes = base64.b64encode(requests.get(image_url).content)
             image_url = base64_bytes.decode('utf-8')
             date_posted_timestamp = i['node']['taken_at_timestamp']
             date_posted_human = datetime.fromtimestamp(date_posted_timestamp).strftime("%Y-%m-%d")
-        
             captions = ""
             
             if i['node']['edge_media_to_caption']:
@@ -114,13 +119,17 @@ class PostSpider(scrapy.Spider):
                 captions = [i.replace('\n','') for i in captions]     
                 captions = ''.join(captions)   
             item = {'post_url': url, 'post_thumb_image':image_url ,'post_taken_at_timestamp': date_posted_human,
-                    'post_description': captions} 
-                        
+                    'post_description': captions}
+
+            # 인플루언서의 pk를 불러옴.            
             pk= influencer_pk(username)        
             pk_url = f'https://api.staging.dabi-api.com/api/influencer/{pk}/feedback/'
+            # 크롤한 데이터들을 rest api에 post함.
             requests.post(pk_url, json={"post_url": url, "post_thumb_image":image_url ,"post_taken_at_timestamp": date_posted_human,
                     "post_description": captions}, headers=headers)            
             yield item
+
+        # 다음 페이지가 있다면 다음 페이지 주소를 받음.    
         if next_page_bool:
             cursor = data['entry_data']['ProfilePage'][0]['graphql']['user']['edge_owner_to_timeline_media']['page_info'][
                     'end_cursor']
@@ -129,31 +138,46 @@ class PostSpider(scrapy.Spider):
             params = {'query_hash': 'e769aa130647d2354c40ea6a439bfc08', 'variables': json.dumps(di)}
             url = 'https://www.instagram.com/graphql/query/?' + urlencode(params)
             
-         
             yield scrapy.Request(get_url(url), callback=self.parse_pages, meta={'pages_di': di})
 
     def parse_pages(self, response):
         di = response.meta['pages_di']
         data = json.loads(response.text)
-        for i in data['data']['user']['edge_owner_to_timeline_media']['edges']:
+        edges = data['data']['user']['edge_owner_to_timeline_media']['edges']
+        
+        edge=[]
+        # 이미 DB에 있는 저장되어있는 포스트는 걸러냄. 
+        for i in edges:
             url = 'https://www.instagram.com/p/' + i['node']['shortcode']
+            username = i['node']['owner']['username']
+            if url not in check_post(username):
+                edge.append(i)
+        # 걸러진 새로운 포스트들을 크롤.        
+        for i in edge:       
+            url = 'https://www.instagram.com/p/' + i['node']['shortcode'] 
             image_url = i['node']['thumbnail_resources'][-1]['src']
             base64_bytes = base64.b64encode(requests.get(image_url).content)
             image_url = base64_bytes.decode('utf-8')
             date_posted_timestamp = i['node']['taken_at_timestamp']
             captions = ""
-            username = data['entry_data']['ProfilePage'][0]['graphql']['user']['username'] 
+            
             if i['node']['edge_media_to_caption']:
                 for i2 in i['node']['edge_media_to_caption']['edges']:
                     captions += i2['node']['text']
                 captions = [i.replace('\n','') for i in captions] 
                 captions = ''.join(captions)            
-            date_posted_human = datetime.fromtimestamp(date_posted_timestamp).strftime("%d/%m/%Y %H:%M:%S")
+            date_posted_human = datetime.fromtimestamp(date_posted_timestamp).strftime("%Y-%m-%d")
             item = {'post_url': url, 'post_thumb_image':image_url ,'post_taken_at_timestamp': date_posted_human,
                     'post_description': captions}
             
-                 
+            # 인플루언서의 pk를 불러옴.            
+            pk= influencer_pk(username)        
+            pk_url = f'https://api.staging.dabi-api.com/api/influencer/{pk}/feedback/'
+            # 크롤한 데이터들을 rest api에 post함.
+            requests.post(pk_url, json={"post_url": url, "post_thumb_image":image_url ,"post_taken_at_timestamp": date_posted_human,
+                    "post_description": captions}, headers=headers)            
             yield item
+
         next_page_bool = data['data']['user']['edge_owner_to_timeline_media']['page_info']['has_next_page']
         if next_page_bool:
             cursor = data['data']['user']['edge_owner_to_timeline_media']['page_info']['end_cursor']
@@ -164,9 +188,4 @@ class PostSpider(scrapy.Spider):
 
    
 
-    def get_item(self, response):
-        # only from the first page
-        item = response.meta['item']
-
-         
-        yield item
+   
